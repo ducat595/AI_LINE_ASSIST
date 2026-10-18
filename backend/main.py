@@ -1,4 +1,6 @@
 import os
+import asyncio
+import random
 from typing import Literal
 from urllib.parse import quote
 import secrets
@@ -55,7 +57,13 @@ async def chat(req: ChatRequest, x_access_code: str | None = Header(default=None
                "generationConfig": {"temperature": 0.5, "maxOutputTokens": 1024}}
     try:
         async with httpx.AsyncClient(timeout=45) as client:
-            r = await client.post(url, headers={"x-goog-api-key": key}, json=payload)
+            for attempt in range(3):
+                r = await client.post(url, headers={"x-goog-api-key": key}, json=payload)
+                if r.status_code not in (503, 500, 502, 504) or attempt == 2:
+                    break
+                await asyncio.sleep((2 ** attempt) + random.uniform(0, 0.5))
+        if r.status_code == 503:
+            raise HTTPException(503, "Geminiが一時的に混雑しています。自動再試行後も利用できませんでした。少し時間をおいて再送信してください")
         if r.status_code == 429:
             raise HTTPException(429, "Gemini無料枠の制限に達しました。時間をおいて再試行してください")
         if r.status_code >= 400:
